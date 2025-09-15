@@ -17,7 +17,7 @@ parses the resulting text to pull out the fields of interest:
 Run as: `python3 extract.py <folder>`, where <folder> contains PDF files.
 """
 
-import logging
+import logging, sys, shutil
 import json
 import re
 import subprocess
@@ -25,27 +25,40 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 import unicodedata
+import os
 
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
 logging.getLogger("pdfminer.pdfpage").setLevel(logging.ERROR)
+logging.basicConfig(stream=sys.stderr, level=logging.ERROR)
 
 # Regular expression for MRN (25RO + 6+ alphanumerics)
 MRN_RE = re.compile(r"\b(25RO[A-Z0-9]{6,})\b")
 
+
 def pdf_to_text(path: str) -> str:
-    """Return the text from a PDF using pdftotext -layout."""
+    # Prefer the bundled binary if provided by the Java app
+    bin_path = os.environ.get("PDFTOTEXT_BIN")
+    if bin_path and os.path.exists(bin_path):
+        exe = bin_path
+    else:
+        exe = shutil.which("pdftotext")
+        if not exe:
+            raise RuntimeError("Missing dependency: 'pdftotext' (Poppler/Xpdf)")
+
+    # Force UTF-8 output; normalize EOLs; keep layout
+    cmd = [exe, "-enc", "UTF-8", "-eol", "unix", "-layout", path, "-"]
+
+    # Capture BYTES (text=False) and decode ourselves
+    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
+    if r.returncode != 0:
+        # surface tool diagnostics
+        raise RuntimeError(r.stderr.decode("utf-8", "replace").strip() or f"pdftotext exit {r.returncode}")
+
+    # Be robust: if anything slips through, replace invalid bytes
     try:
-        result = subprocess.run(
-            ["pdftotext", "-layout", path, "-"],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        return result.stdout
-    except Exception as exc:
-        logging.error("pdftotext failed on %s: %s", path, exc)
-        return ""
+        return r.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        return r.stdout.decode("utf-8", "replace")
 
 def extract_identificare(full_text: str) -> Optional[str]:
     """Return AWB/CMR by scanning Documentul de transport blocks."""
@@ -231,6 +244,7 @@ def main(folder_path: str) -> None:
         except Exception as e:
             rec = {"file": pdf_path.name, "error": str(e)}
         results.append(rec)
+    # ONLY JSON to stdout:
     print(json.dumps(results, ensure_ascii=False))
 
 if __name__ == "__main__":
