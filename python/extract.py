@@ -36,15 +36,14 @@ logging.basicConfig(stream=sys.stderr, level=logging.ERROR)
 MRN_RE = re.compile(r"\b(25RO[A-Z0-9]{6,})\b")
 
 try:
-    # Python 3.7+: simple path
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
-    # PyInstaller / older fallback
     if hasattr(sys.stdout, "buffer"):
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     if hasattr(sys.stderr, "buffer"):
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
 
 
 def emit_json(results):
@@ -52,34 +51,38 @@ def emit_json(results):
     try:
         sys.stdout.write(s)
     except UnicodeEncodeError:
-        # last-ditch fallback on weird consoles: ASCII with \uXXXX escapes
         sys.stdout.write(json.dumps(results, ensure_ascii=True))
     sys.stdout.flush()
 
-def pdf_to_text(path: str) -> str:
-    # Prefer the bundled binary if provided by the Java app
-    bin_path = os.environ.get("PDFTOTEXT_BIN")
-    if bin_path and os.path.exists(bin_path):
-        exe = bin_path
-    else:
-        exe = shutil.which("pdftotext")
-        if not exe:
-            raise RuntimeError("Missing dependency: 'pdftotext' (Poppler/Xpdf)")
+def text_from_pdf(path: str) -> str:
+    """
+    Try Poppler/Xpdf pdftotext (layout-preserving, UTF-8).
+    If not available or fails at runtime, fall back to pdfplumber.
+    """
+    exe = os.environ.get("PDFTOTEXT_BIN") or shutil.which("pdftotext")
+    if exe:
+        try:
+            r = subprocess.run(
+                [exe, "-enc", "UTF-8", "-eol", "unix", "-layout", path, "-"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False, check=True
+            )
+            # robust decode
+            try:
+                return r.stdout.decode("utf-8")
+            except UnicodeDecodeError:
+                return r.stdout.decode("utf-8", "replace")
+        except Exception:
+            # fall back to pdfplumber if pdftotext isn’t runnable on this machine
+            pass
 
-    # Force UTF-8 output; normalize EOLs; keep layout
-    cmd = [exe, "-enc", "UTF-8", "-eol", "unix", "-layout", path, "-"]
-
-    # Capture BYTES (text=False) and decode ourselves
-    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
-    if r.returncode != 0:
-        # surface tool diagnostics
-        raise RuntimeError(r.stderr.decode("utf-8", "replace").strip() or f"pdftotext exit {r.returncode}")
-
-    # Be robust: if anything slips through, replace invalid bytes
-    try:
-        return r.stdout.decode("utf-8")
-    except UnicodeDecodeError:
-        return r.stdout.decode("utf-8", "replace")
+    # Fallback: pure python (no external deps)
+    out = []
+    with pdfplumber.open(path) as pdf:
+        for p in pdf.pages:
+            # tighter tolerances keep columns together better
+            t = p.extract_text(x_tolerance=1.0, y_tolerance=1.0) or ""
+            out.append(t)
+    return "\n".join(out)
 
 def extract_identificare(full_text: str) -> Optional[str]:
     """Return AWB/CMR by scanning Documentul de transport blocks."""
@@ -250,22 +253,20 @@ def extract_fields(text: str) -> dict:
     greutate = extract_greutate(lines)
     if greutate is not None:
         data["greutate"] = greutate
-    desc = extract_descrierea_marfurilor(text)
-    if desc:
-        data["descriereaMarfurilor"] = desc
+    data["descriereaMarfurilor"] = extract_descrierea_marfurilor(text)  # <— use the same full text
+
     return data
 
-def main(folder_path: str) -> None:
+def main(folder_path):
     results = []
     for pdf_path in Path(folder_path).glob("*.pdf"):
         try:
-            text = pdf_to_text(str(pdf_path))
-            rec = extract_fields(text)
+            text = text_from_pdf(str(pdf_path))
+            rec = extract_fields(text)          # <— do NOT reopen the pdf here
             rec["file"] = pdf_path.name
         except Exception as e:
             rec = {"file": pdf_path.name, "error": str(e)}
         results.append(rec)
-    # ONLY JSON to stdout:
     emit_json(results)
 
 if __name__ == "__main__":

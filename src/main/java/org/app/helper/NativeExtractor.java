@@ -1,3 +1,4 @@
+// src/main/java/org/app/helper/NativeExtractor.java
 package org.app.helper;
 
 import java.io.FileNotFoundException;
@@ -27,21 +28,14 @@ public class NativeExtractor {
             throw new UnsupportedOperationException("Unsupported OS: " + os);
         }
 
-        // load the binary from the JAR
         try (InputStream in = NativeExtractor.class.getResourceAsStream(resourcePath)) {
-            if (in == null) {
-                throw new FileNotFoundException("Resource not found on classpath: " + resourcePath);
-            }
+            if (in == null) throw new FileNotFoundException("Resource not found on classpath: " + resourcePath);
 
-            // copy to a temporary file
             Path tmp = Files.createTempFile("pdf-extractor-", suffix);
-            // atomic copy
             Files.copy(in, tmp, StandardCopyOption.REPLACE_EXISTING);
 
-            // make it executable
             tmp.toFile().setExecutable(true, true);
             tmp.toFile().deleteOnExit();
-
             return tmp;
         }
     }

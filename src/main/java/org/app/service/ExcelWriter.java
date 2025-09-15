@@ -166,8 +166,8 @@ public final class ExcelWriter {
 
             // 12) Greutate
             String g = dto.getGreutate();
-            if (isNumeric(g)) setNumber(r, c++, Double.parseDouble(g.replace(",", ".")), dataStyle);
-            else setText(r, c++, safe(g), dataStyle);
+            System.out.println("g: " + g);
+            setText(r, c++, g, dataStyle);
 
             // 13) Felul mărfurilor
             String fel = dto.getDescriereaMarfurilor() != null ? dto.getDescriereaMarfurilor() : "";
