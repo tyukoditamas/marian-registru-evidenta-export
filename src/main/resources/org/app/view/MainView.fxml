@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<VBox xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="org.app.controller.MainController"
+      spacing="14" alignment="TOP_LEFT">
+    <padding>
+        <Insets top="20" right="20" bottom="20" left="20"/>
+    </padding>
+
+    <GridPane hgap="12" vgap="12">
+        <columnConstraints>
+            <ColumnConstraints halignment="RIGHT" minWidth="140"/>
+            <ColumnConstraints hgrow="ALWAYS"/>
+        </columnConstraints>
+
+        <Label text="Start Nr. Crt.:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+        <TextField fx:id="startIndexField" promptText="e.g. 1"
+                   GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+
+        <Label text="PDF Folder:" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+        <HBox spacing="8" GridPane.rowIndex="1" GridPane.columnIndex="1">
+            <TextField fx:id="folderField" promptText="Choose a folder…" HBox.hgrow="ALWAYS" editable="false"/>
+            <Button fx:id="browseButton" text="Browse…" onAction="#onBrowse"/>
+        </HBox>
+
+        <HBox spacing="8" GridPane.rowIndex="2" GridPane.columnIndex="1" alignment="CENTER_LEFT">
+            <Button fx:id="generateButton" text="Generate Excel" defaultButton="true" onAction="#onGenerate"/>
+            <Button text="Clear Log" onAction="#onClearLog"/>
+        </HBox>
+    </GridPane>
+
+    <Label text="Log" styleClass="section"/>
+    <StackPane VBox.vgrow="ALWAYS">
+        <TextArea fx:id="logArea" editable="false" wrapText="true"/>
+        <ProgressIndicator fx:id="spinner" maxWidth="64" maxHeight="64" visible="false"/>
+    </StackPane>
+
+    <HBox spacing="10" alignment="CENTER_LEFT">
+        <Label text="Status:"/>
+        <Label fx:id="statusLabel" text="Idle"/>
+    </HBox>
+</VBox>

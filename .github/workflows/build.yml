@@ -1,0 +1,87 @@
+name: Build extractors & package native JARs
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-extractors:
+    strategy:
+      matrix:
+        os: [ macos-latest, windows-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python 3.x
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      # Unix (macOS/Linux) step
+      - name: Build extractor (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install pdfplumber pyinstaller
+          pyinstaller --onefile python/extract.py --name extract
+          echo "artifact=extract" >> $GITHUB_OUTPUT
+
+      # Windows step
+      - name: Build extractor (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m venv venv
+          .\venv\Scripts\Activate.ps1
+          pip install pdfplumber pyinstaller
+          pyinstaller --onefile python/extract.py --name extract.exe
+          echo "artifact=extract.exe" >> $GITHUB_OUTPUT
+
+      - name: Upload extractor
+        uses: actions/upload-artifact@v4
+        with:
+          name: extractor-${{ runner.os == 'Windows' && 'windows' || 'macos' }}
+          path: dist/${{ steps.build-extractor.outputs.artifact }}
+
+  package:
+    needs: build-extractors
+    strategy:
+      matrix:
+        os: [ macos-latest, windows-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download Windows extractor
+        if: runner.os == 'Windows'
+        uses: actions/download-artifact@v4
+        with:
+          name: extractor-windows
+          path: src/main/resources/native/windows
+
+      - name: Download macOS extractor
+        if: runner.os != 'Windows'
+        uses: actions/download-artifact@v4
+        with:
+          name: extractor-macos
+          path: src/main/resources/native/macos
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build & package JavaFX app
+        run: mvn clean package -DskipTests
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: registru-evidenta-export-${{ runner.os == 'Windows' && 'windows' || 'macos' }}
+          path: target/jpackage/**
