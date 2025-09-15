@@ -1,31 +1,41 @@
 #!/usr/bin/env python3
-import os, sys, json, re, shutil, subprocess, unicodedata
+# extract_win.py
+import os, sys, re, json, shutil, subprocess, unicodedata
 from pathlib import Path
 
 MRN_RE = re.compile(r"\b(25RO[A-Z0-9]{6,})\b", re.I)
 
 def pdf_to_text(path: str) -> str:
-    # Prefer bundled binary from the Java app
-    bin_path = os.environ.get("PDFTOTEXT_BIN")
-    if bin_path and os.path.exists(bin_path):
-        exe = bin_path
+    exe_dir = Path(sys.executable).parent  # PyInstaller onefile: the temp dir with the EXE
+    local = exe_dir / ("pdftotext.exe" if os.name == "nt" else "pdftotext")
+    if local.exists():
+        exe = str(local)
     else:
-        exe = shutil.which("pdftotext")
-        if not exe:
-            raise RuntimeError("Missing dependency: 'pdftotext' (Poppler/Xpdf)")
-    # Force UTF-8 + Unix EOL for stable parsing
+        env_bin = os.environ.get("PDFTOTEXT_BIN")
+        if env_bin and os.path.exists(env_bin):
+            exe = env_bin
+        else:
+            which = shutil.which("pdftotext")
+            if not which:
+                raise RuntimeError(f"Missing dependency: 'pdftotext' (Poppler/Xpdf). "
+                                   f"Tried local={local}, PDFTOTEXT_BIN={env_bin or '<unset>'}")
+            exe = which
+
+    # Force UTF-8 output; normalize EOLs; keep layout
     cmd = [exe, "-enc", "UTF-8", "-eol", "unix", "-layout", path, "-"]
     r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
     if r.returncode != 0:
         raise RuntimeError((r.stderr.decode("utf-8", "replace") or f"pdftotext exit {r.returncode}").strip())
+
     try:
         return r.stdout.decode("utf-8")
     except UnicodeDecodeError:
         return r.stdout.decode("utf-8", "replace")
 
 def _strip_accents(s: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
+# === the same field extractors you used on mac ===
 def extract_identificare(full_text: str):
     hdr = list(re.finditer(r"Documentul de transport\s*\[\s*12\s*05\s*\]", full_text, flags=re.I))
     if not hdr: return None
@@ -34,19 +44,19 @@ def extract_identificare(full_text: str):
         end_candidates = [e for e in ends if e > m.end()]
         end_pos = min(end_candidates) if end_candidates else len(full_text)
         seg = full_text[m.end():end_pos]
-        if re.search(r"\bN\s*740\b|\bN\s*741\b", seg, flags=re.I): return "AWB"
-        if re.search(r"\bN\s*730\b", seg, flags=re.I): return "CMR"
+        if re.search(r"\bN\s*740\b|\bN\s*741\b", seg, re.I): return "AWB"
+        if re.search(r"\bN\s*730\b", seg, re.I): return "CMR"
     return None
 
 def extract_buc(lines):
     for i, l in enumerate(lines):
         if re.search(r"\[\s*18\s*06\s*\]", l):
-            for j in range(i + 1, min(i + 6, len(lines))):
-                s = re.sub(r"\s+", " ", lines[j].strip())
-                if not s: continue
-                m = re.search(r"/\s*(?:PC|PX)\s*/\s*(\d+)\s*/", s, flags=re.I)
+            for j in range(i+1, min(i+6, len(lines))):
+                s2 = re.sub(r"\s+", " ", lines[j].strip())
+                if not s2: continue
+                m = re.search(r"/\s*(?:PC|PX)\s*/\s*(\d+)\s*/", s2, re.I)
                 if m: return int(m.group(1))
-                parts = [p.strip() for p in s.split("/") if p.strip()]
+                parts = [p.strip() for p in s2.split("/") if p.strip()]
                 if len(parts) >= 3 and re.fullmatch(r"\d+", parts[-2]): return int(parts[-2])
             break
     return None
@@ -94,10 +104,7 @@ def extract_descrierea_marfurilor(text: str) -> str:
     orig_lines = text.splitlines()
     clean_lines = clean.splitlines()
     hdr = re.compile(r"Descrierea\s+marfurilor\s*\[\s*18\s*0?5\s*\]", re.I)
-    stopper = re.compile(
-        r"^(?:Expeditor|Destinatar|Tipul\s+si\s+nr\.|Tipul\s+și\s+nr\.|Cod\s+CUS|Cod\s+ONU|Masa\s+bruta|Masa\s+neta|Tara\s+de\s+destinatie|Tara\s+exportatoare|Reg\.)\b",
-        re.I
-    )
+    stopper = re.compile(r"^(?:Expeditor|Destinatar|Tipul\s+si\s+nr\.|Tipul\s+și\s+nr\.|Cod\s+CUS|Cod\s+ONU|Masa\s+bruta|Masa\s+neta|Tara\s+de\s+destinatie|Tara\s+exportatoare|Reg\.)\b", re.I)
     for i, line in enumerate(clean_lines):
         if hdr.search(line):
             j = i+1
@@ -154,6 +161,7 @@ def main(folder: str):
         except Exception as e:
             rec = {"file": pdf.name, "error": str(e)}
         results.append(rec)
+    # ONLY JSON to stdout
     print(json.dumps(results, ensure_ascii=False))
 
 if __name__ == "__main__":

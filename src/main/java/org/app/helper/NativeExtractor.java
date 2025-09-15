@@ -6,37 +6,35 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 
 public class NativeExtractor {
     /**
      * Unpacks the correct native extractor for this OS to a temp file,
      * makes it executable, and returns its Path.
      */
-    public static Path unpackExtractor() throws IOException {
-        String os = System.getProperty("os.name").toLowerCase();
-        String resourcePath;
-        String suffix;
+    public static Path unpackExtractor(java.util.function.Consumer<String> log) throws IOException {
+        boolean win = System.getProperty("os.name").toLowerCase().contains("win");
+        Path dir = java.nio.file.Files.createTempDirectory("pdf-extractor-");
 
-        if (os.contains("win")) {
-            resourcePath = "/native/windows/extract.exe";
-            suffix       = ".exe";
-        } else if (os.contains("mac")) {
-            resourcePath = "/native/macos/extract";
-            suffix       = "";
-        } else {
-            throw new UnsupportedOperationException("Unsupported OS: " + os);
-        }
+        String extractorRes = win ? "/native/windows/extract.exe" : "/native/macos/extract";
+        Path extractor = dir.resolve(win ? "extract.exe" : "extract");
+        copyRes(extractorRes, extractor);
 
-        try (InputStream in = NativeExtractor.class.getResourceAsStream(resourcePath)) {
-            if (in == null) throw new FileNotFoundException("Resource not found on classpath: " + resourcePath);
+        // put pdftotext right next to extractor
+        Path pdftotext = dir.resolve(win ? "pdftotext.exe" : "pdftotext");
+        copyRes(win ? "/native/windows/pdftotext.exe" : "/native/macos/pdftotext", pdftotext);
+        try { pdftotext.toFile().setExecutable(true); } catch (Exception ignore) {}
+        try { extractor.toFile().setExecutable(true); } catch (Exception ignore) {}
 
-            Path tmp = Files.createTempFile("pdf-extractor-", suffix);
-            Files.copy(in, tmp, StandardCopyOption.REPLACE_EXISTING);
+        if (log != null) log.accept("Extractor path: " + extractor);
+        return extractor;
+    }
 
-            tmp.toFile().setExecutable(true, true);
-            tmp.toFile().deleteOnExit();
-            return tmp;
+    private static void copyRes(String res, Path dest) throws IOException {
+        try (InputStream in = NativeExtractor.class.getResourceAsStream(res)) {
+            if (in == null) throw new FileNotFoundException("Missing resource: " + res);
+            java.nio.file.Files.createDirectories(dest.getParent());
+            java.nio.file.Files.copy(in, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         }
     }
 }

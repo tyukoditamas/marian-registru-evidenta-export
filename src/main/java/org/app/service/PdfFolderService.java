@@ -28,8 +28,26 @@ public class PdfFolderService {
     }
 
     public List<RegistruEvidentaDto> processFolder(File folder) throws Exception {
-        Path extractor = NativeExtractor.unpackExtractor();
-        logger.accept("Extractor path: " + extractor.toAbsolutePath());
+        Path extractor = NativeExtractor.unpackExtractor(logger);
+
+        // Resolve pdftotext that we just placed next to the extractor
+        boolean win = System.getProperty("os.name").toLowerCase().contains("win");
+        Path pdftotext = extractor.getParent().resolve(win ? "pdftotext.exe" : "pdftotext");
+        logger.accept("Using pdftotext: " + pdftotext + " (exists=" + java.nio.file.Files.exists(pdftotext) + ")");
+
+        // Optional: quick -v check to catch AV/permission issues early
+        try {
+            ProcessBuilder vpb = new ProcessBuilder(pdftotext.toString(), "-v");
+            vpb.redirectErrorStream(true);
+            Process vp = vpb.start();
+            String ver = new java.io.BufferedReader(new java.io.InputStreamReader(vp.getInputStream()))
+                    .lines().findFirst().orElse("(no output)");
+            vp.waitFor();
+            logger.accept("pdftotext -v: " + ver);
+        } catch (Exception e) {
+            logger.accept("pdftotext self-check failed: " + e.getMessage());
+        }
+
 
         ProcessBuilder pb = new ProcessBuilder(
                 extractor.toAbsolutePath().toString(),
@@ -39,6 +57,7 @@ public class PdfFolderService {
 
         // Keep stdout/stderr in UTF-8
         Map<String,String> env = pb.environment();
+        env.put("PDFTOTEXT_BIN", pdftotext.toString());
         env.put("PYTHONIOENCODING", "utf-8");
         env.put("PYTHONUTF8", "1");
 
