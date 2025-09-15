@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import List, Optional
 import unicodedata
 import os
+import json
 
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
 logging.getLogger("pdfminer.pdfpage").setLevel(logging.ERROR)
@@ -34,6 +35,26 @@ logging.basicConfig(stream=sys.stderr, level=logging.ERROR)
 # Regular expression for MRN (25RO + 6+ alphanumerics)
 MRN_RE = re.compile(r"\b(25RO[A-Z0-9]{6,})\b")
 
+try:
+    # Python 3.7+: simple path
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    # PyInstaller / older fallback
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, "buffer"):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+
+def emit_json(results):
+    s = json.dumps(results, ensure_ascii=False)
+    try:
+        sys.stdout.write(s)
+    except UnicodeEncodeError:
+        # last-ditch fallback on weird consoles: ASCII with \uXXXX escapes
+        sys.stdout.write(json.dumps(results, ensure_ascii=True))
+    sys.stdout.flush()
 
 def pdf_to_text(path: str) -> str:
     # Prefer the bundled binary if provided by the Java app
@@ -245,7 +266,7 @@ def main(folder_path: str) -> None:
             rec = {"file": pdf_path.name, "error": str(e)}
         results.append(rec)
     # ONLY JSON to stdout:
-    print(json.dumps(results, ensure_ascii=False))
+    emit_json(results)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
