@@ -161,8 +161,11 @@ def main(folder: str):
         except Exception as e:
             rec = {"file": pdf.name, "error": str(e)}
         results.append(rec)
-    # ONLY JSON to stdout
-    print(json.dumps(results, ensure_ascii=False))
+
+    # ONLY JSON to stdout, as UTF-8 BYTES (avoids cp1252 encode errors)
+    out = json.dumps(results, ensure_ascii=False)
+    sys.stdout.buffer.write(out.encode("utf-8"))
+    sys.stdout.buffer.flush()
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

@@ -57,6 +57,8 @@ public class PdfFolderService {
 
         // Keep stdout/stderr in UTF-8
         Map<String,String> env = pb.environment();
+        env.put("PYTHONIOENCODING", "utf-8"); // forces UTF-8 stdio in Python
+        env.put("PYTHONUTF8", "1");           // Python’s -X utf8 mode
         env.put("PDFTOTEXT_BIN", pdftotext.toString());
         env.put("PYTHONIOENCODING", "utf-8");
         env.put("PYTHONUTF8", "1");
