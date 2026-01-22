@@ -209,6 +209,7 @@ def extract_identificare_from_pages(page_texts: List[str]) -> Optional[str]:
     )
     awb_re = re.compile(r"\bN\s*74[0O1]\b", flags=re.I)
     cmr_re = re.compile(r"\bN\s*73[0O]\b", flags=re.I)
+    borderou_re = re.compile(r"\bN\s*787\b", flags=re.I)
 
     def scan_text(t: str) -> Optional[str]:
         hdr_iter = list(hdr_re.finditer(t))
@@ -218,6 +219,8 @@ def extract_identificare_from_pages(page_texts: List[str]) -> Optional[str]:
         for m in hdr_iter:
             end_pos = min((e for e in ends if e > m.end()), default=len(t))
             seg = t[m.end():end_pos]
+            if borderou_re.search(seg):
+                return "Borderou"
             if awb_re.search(seg):
                 return "AWB"
             if cmr_re.search(seg):
@@ -250,7 +253,7 @@ def extract_buc_from_pages(page_texts: List[str]) -> Optional[int]:
         r"\bMasa\b",
         r"\bRegim",
     ]
-    heads = r"(?:PC|PX|COLI|COL|CT|BX|PAL(?:ETI|ET)?|PCE|PCS)"
+    heads = r"(?:PC|PX|COLI|COL|CT|BX|PAL(?:ETI|ET)?|PCE|PCS|N\\s*E|NE)"
     # accept either ' / ' or just whitespace between head and number
     value_pat = re.compile(rf"(?m)^[^\S\r\n]*{heads}\s*(?:/|\s)\s*(\d{{1,6}})\b")
 
@@ -270,7 +273,7 @@ def extract_buc_from_pages(page_texts: List[str]) -> Optional[int]:
             m = value_pat.search(seg)
         if m:
             v = int(m.group(1))
-            if 1 <= v <= 1000:
+            if 1 <= v <= 1000000:
                 return v
     return None
 
