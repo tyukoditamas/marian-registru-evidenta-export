@@ -389,7 +389,11 @@ def main():
         print(f"Path not found: {root}", file=sys.stderr)
         sys.exit(2)
     results = [extract_one_pdf(p) for p in find_pdfs(root)]
-    print(json.dumps(results, ensure_ascii=False))
+    print(json.dumps(results, ensure_ascii=True))
+#     data = json.dumps(results, ensure_ascii=False)
+#     sys.stdout.buffer.write(data.encode('utf-8'))
+#     sys.stdout.buffer.write(b"\n")
+#     sys.stdout.buffer.buffer.flush
 
 if __name__ == "__main__":
     main()
