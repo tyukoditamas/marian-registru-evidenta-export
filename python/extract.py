@@ -158,7 +158,7 @@ def extract_mrn(words: List[dict], filename: Optional[str] = None) -> Optional[s
     """Find token starting with '25RO...' and return substring AFTER the 11th char (no C/N assumption)."""
     def mrn_from_token(tok: str) -> Optional[str]:
         s = re.sub(r"[^A-Z0-9]", "", tok.upper())
-        if s.startswith("25RO") and len(s) >= 18:
+        if (s.startswith("25RO") or s.startswith("26RO")) and len(s) >= 18:
             return s[11:]
         return None
     for w in words:
@@ -197,21 +197,41 @@ def extract_identificare_from_pages(page_texts: List[str]) -> Optional[str]:
       'Documentul de transport [12 05]' ... 'Documentul precedent [12 01]'
     If contains N740/N741 -> AWB; if N730 -> CMR.
     """
-    for txt in page_texts:
-        t = strip_accents(txt)
-        hdr_iter = list(re.finditer(r"Documentul de transport\s*\[\s*12\s*05\s*\]", t, flags=re.I))
+    hdr_re = re.compile(
+        r"Documentul\s+de\s+transport\b(?:\s*[-–—]?\s*[^\[]*)?\[\s*12\s*05\s*\]"
+        r"|\bDocumentul\s+de\s+transport\b",
+        flags=re.I,
+    )
+    end_re = re.compile(
+        r"Documentul\s+precedent\b(?:\s*[-–—]?\s*[^\[]*)?\[\s*12\s*01\s*\]"
+        r"|\bDocumentul\s+precedent\b",
+        flags=re.I,
+    )
+    awb_re = re.compile(r"\bN\s*74[0O1]\b", flags=re.I)
+    cmr_re = re.compile(r"\bN\s*73[0O]\b", flags=re.I)
+
+    def scan_text(t: str) -> Optional[str]:
+        hdr_iter = list(hdr_re.finditer(t))
         if not hdr_iter:
-            continue
-        end_iter = list(re.finditer(r"Documentul precedent\s*\[\s*12\s*01\s*\]", t, flags=re.I))
-        ends = [m.start() for m in end_iter]
+            return None
+        ends = [m.start() for m in end_re.finditer(t)]
         for m in hdr_iter:
             end_pos = min((e for e in ends if e > m.end()), default=len(t))
             seg = t[m.end():end_pos]
-            if re.search(r"\bN\s*740\b|\bN\s*741\b", seg, flags=re.I):
+            if awb_re.search(seg):
                 return "AWB"
-            if re.search(r"\bN\s*730\b", seg, flags=re.I):
+            if cmr_re.search(seg):
                 return "CMR"
-    return None
+        return None
+
+    for txt in page_texts:
+        t = strip_accents(txt)
+        found = scan_text(t)
+        if found:
+            return found
+
+    joined = strip_accents("\n".join(page_texts))
+    return scan_text(joined)
 
 
 # ------------------------ the two fixed fields ------------------------
@@ -219,7 +239,7 @@ def extract_identificare_from_pages(page_texts: List[str]) -> Optional[str]:
 def extract_buc_from_pages(page_texts: List[str]) -> Optional[int]:
     """
     Pieces count from *inside the packages section only*:
-      between 'Tipul și nr. de colete, mărcile de expediție [18 06]'
+      between field code '[18 06]' and the next major header
       and the next major header (Descrierea / Cod nomenclatură / Valoarea / Masa / Regim).
     Then match 'PC / 92 / ...' or 'PX / 2 / ...' → return the middle number.
     """
@@ -238,7 +258,7 @@ def extract_buc_from_pages(page_texts: List[str]) -> Optional[int]:
         t = strip_accents(txt)
         seg = slice_between(
             t,
-            r"Tipul\s+si\s+nr\.?\s+de\s+colete.*?\[\s*18\s*06\s*\]|\bTipul\s+si\b.*colete",
+            r"\[\s*18\s*06\s*\]",
             next_headers,
         )
         if not seg:
@@ -270,9 +290,10 @@ def extract_descriere_from_pages(page_texts: List[str]) -> Optional[str]:
     for txt in page_texts:
         # keep original spacing for nicer output, but use accent-stripped for slicing
         t = strip_accents(txt)
+        start_pat = r"Descrierea\s+m[ăa]rfurilor(?:\s*[-–—]?\s*\[\s*18\s*05\s*\])?"
         seg = slice_between(
             t,
-            r"Descrierea\s+m[ăa]rfurilor\s*\[\s*18\s*05\s*\]|\bDescrierea\s+m[ăa]rfurilor\b",
+            start_pat,
             next_headers,
         )
         if not seg:
@@ -280,34 +301,56 @@ def extract_descriere_from_pages(page_texts: List[str]) -> Optional[str]:
         # Work line by line from the original (non-stripped) text,
         # but align by splitting the same way.
         lines = [ln.rstrip() for ln in txt.splitlines()]
+        norm_lines = [strip_accents(ln).lower() for ln in lines]
+        header_re = re.compile(r"descrierea\s+marfurilor", flags=re.I)
         # Find the header line index in the original text
         header_idx = None
-        for i, ln in enumerate(lines):
-            if re.search(r"Descrierea\s+m[ăa]rfurilor", ln, flags=re.I):
+        for i, ln in enumerate(norm_lines):
+            if header_re.search(ln):
                 header_idx = i
                 break
         if header_idx is None:
-            continue
+            # Handle header split across two lines: "Descrierea" / "mărfurilor"
+            for i, ln in enumerate(norm_lines[:-1]):
+                if "descrierea" in ln and "marfurilor" in norm_lines[i + 1]:
+                    header_idx = i + 1
+                    break
         # Pick the first clean non-empty line after the header
-        for j in range(header_idx + 1, min(header_idx + 8, len(lines))):
-            candidate = lines[j].strip()
+        def clean_candidate(candidate: str) -> Optional[str]:
             if not candidate:
-                continue
+                return None
             if "[" in candidate or "]" in candidate:
-                # skip lines that still show field-code brackets
-                continue
-            # skip obvious other headers that sometimes appear right below
+                # If a value is present after the last field-code bracket, keep it.
+                if "]" in candidate:
+                    tail = candidate.rsplit("]", 1)[-1].strip()
+                    tail = re.sub(r"^[\s:\-–—]+", "", tail)
+                    if tail:
+                        candidate = tail
+                    else:
+                        return None
+                else:
+                    return None
             bad_starts = ("Expeditor", "Destinatar", "Alt", "Ţara", "Tara", "Cod ", "Unită", "Tipul", "Regim", "Valoarea", "Masa", "Totalul")
             if candidate.startswith(bad_starts):
-                continue
-            # Strip leading index "1", "1.", "1)"
+                return None
             candidate = re.sub(r"^\s*\d+[.)]?\s+", "", candidate)
-            # Normalize hyphen spacing & whitespace
             candidate = re.sub(r"\s*-\s*", " - ", candidate)
             candidate = re.sub(r"\s+([.,;:])", r"\1", candidate)
             candidate = re.sub(r"\s{2,}", " ", candidate).strip()
-            if candidate:
-                return candidate
+            return candidate or None
+
+        if header_idx is not None:
+            for j in range(header_idx + 1, min(header_idx + 8, len(lines))):
+                cleaned = clean_candidate(lines[j].strip())
+                if cleaned:
+                    return cleaned
+
+        # Fallback: if header line couldn't be located, use the sliced segment directly.
+        seg_orig = slice_between(txt, start_pat, next_headers) or ""
+        for ln in seg_orig.splitlines():
+            cleaned = clean_candidate(ln.strip())
+            if cleaned:
+                return cleaned
     return None
 
 
@@ -332,7 +375,7 @@ def find_pdfs(root: Path) -> List[Path]:
     root = Path(root)
     if root.is_file() and root.suffix.lower() == ".pdf":
         return [root]
-    return sorted(root.rglob("*.pdf"))
+    return sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() == ".pdf")
 
 def main():
     if len(sys.argv) < 2:

@@ -5,8 +5,6 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.app.helper.NativeExtractor;
 import org.app.model.RegistruEvidentaDto;
 
@@ -16,14 +14,10 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Objects;
 import java.util.function.Consumer;
 
 public class PdfFolderService {
-
-    private static final Log log = LogFactory.getLog(PdfFolderService.class);
 
     private final ObjectMapper mapper;
     private final Consumer<String> logger;
@@ -157,46 +151,6 @@ public class PdfFolderService {
                 logger.accept("⚠️ Extractor JSON missing key '" + key + "' in first element.");
             }
         }
-    }
-
-    private static String nullSafe(String s) {
-        return s == null ? "" : s;
-    }
-
-    // Simple natural comparator for strings with numbers (e.g., file names)
-    private static int naturalCompare(String a, String b) {
-        if (Objects.equals(a, b)) return 0;
-        if (a == null) return 1;
-        if (b == null) return -1;
-
-        int ia = 0, ib = 0, na = a.length(), nb = b.length();
-        while (ia < na && ib < nb) {
-            char ca = Character.toLowerCase(a.charAt(ia));
-            char cb = Character.toLowerCase(b.charAt(ib));
-
-            if (Character.isDigit(ca) && Character.isDigit(cb)) {
-                int ja = ia; while (ja < na && Character.isDigit(a.charAt(ja))) ja++;
-                int jb = ib; while (jb < nb && Character.isDigit(b.charAt(jb))) jb++;
-
-                String da = a.substring(ia, ja);
-                String db = b.substring(ib, jb);
-
-                // strip leading zeros
-                String da2 = da.replaceFirst("^0+(?!$)", "");
-                String db2 = db.replaceFirst("^0+(?!$)", "");
-
-                int cmp = Integer.compare(da2.length(), db2.length());
-                if (cmp == 0) cmp = da2.compareTo(db2);
-                if (cmp != 0) return cmp;
-
-                ia = ja; ib = jb; // numbers equal → continue
-                continue;
-            }
-
-            if (ca != cb) return ca - cb;
-            ia++; ib++;
-        }
-        return (na - ia) - (nb - ib);
     }
 
     // result holder
